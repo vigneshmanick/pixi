@@ -16,28 +16,35 @@ use std::collections::HashMap;
 /// Adds a dependency to the project
 #[derive(Parser, Debug)]
 pub struct Args {
+    /// Package to install according to the matchspec
     specs: Vec<MatchSpec>,
+
+    /// This is a pip package
+    #[arg(long)]
+    pip: bool,
 }
 
-pub async fn execute(args: Args) -> anyhow::Result<()> {
-    // Determine the location and metadata of the current project
-    let mut project = Project::discover()?;
+/// Adds the pip dependency directly to the project file
+fn add_pip(specs: &Vec<MatchSpec>, project: &mut Project) -> anyhow::Result<Vec<MatchSpec>> {
+    for spec in specs.iter() {
+        project.add_pip_dependency(spec)?;
+    }
+    Ok(specs.clone())
+}
 
+/// Adds the best solvable conda package to the project file
+async fn add_conda(specs: &Vec<MatchSpec>, project: &mut Project, sparse_repo_data: &Vec<SparseRepoData>) -> anyhow::Result<Vec<MatchSpec>> {
     // Split the specs into package name and version specifier
-    let new_specs = args
-        .specs
+    let new_specs = specs
         .into_iter()
         .map(|spec| match &spec.name {
-            Some(name) => Ok((name.clone(), spec.into())),
+            Some(name) => Ok((name.clone(), spec.clone().into())),
             None => Err(anyhow::anyhow!("missing package name for spec '{spec}'")),
         })
         .collect::<anyhow::Result<HashMap<String, NamelessMatchSpec>>>()?;
 
     // Get the current specs
     let current_specs = project.dependencies()?;
-
-    // Fetch the repodata for the project
-    let sparse_repo_data = project.fetch_sparse_repodata().await?;
 
     // Determine the best version per platform
     let mut best_versions = HashMap::new();
@@ -91,24 +98,52 @@ pub async fn execute(args: Args) -> anyhow::Result<()> {
             spec
         };
         let spec = MatchSpec::from_nameless(updated_spec, Some(name));
-        project.add_dependency(&spec)?;
+        project.add_conda_dependency(&spec)?;
         added_specs.push(spec);
     }
+    Ok(added_specs)
+}
 
-    // Update the lock file and write to disk
-    update_lock_file(
-        &project,
-        load_lock_file(&project).await?,
-        Some(sparse_repo_data),
-    )
-    .await?;
+pub async fn execute(args: Args) -> anyhow::Result<()> {
+    // Determine the location and metadata of the current project
+    let mut project = Project::discover()?;
+
+    // If it is a pip package just add it directly to the project
+    // Solve it with pip later
+
+    // Fetch the repodata for the project
+    let added_specs = if args.pip {
+        let added_specs = add_pip(&args.specs, &mut project)?;
+        update_lock_file(
+            &project,
+            load_lock_file(&project).await?,
+            None,
+        )
+            .await?;
+        added_specs
+    } else {
+        let sparse_repo_data = project.fetch_sparse_repodata().await?;
+        let added_specs = add_conda(&args.specs, &mut project, &sparse_repo_data).await?;
+        // Update the lock file and write to disk
+        update_lock_file(
+            &project,
+            load_lock_file(&project).await?,
+            Some(sparse_repo_data),
+        )
+            .await?;
+        added_specs
+    };
+
+
     project.save()?;
 
+    let pkg_manager =  if args.pip {" (pip package)"} else { "" };
     for spec in added_specs {
         eprintln!(
-            "{}Added {}",
+            "{}Added {}{}",
             console::style(console::Emoji("✔ ", "")).green(),
-            spec
+            spec,
+            pkg_manager
         );
     }
 

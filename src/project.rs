@@ -5,13 +5,36 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{env, fs};
-use toml_edit::{Document, Item, Table};
+use toml_edit::{Document, Item, Table, TableLike};
 
 /// A project represented by a pax.toml file.
 #[derive(Debug)]
 pub struct Project {
     root: PathBuf,
     doc: Document,
+}
+
+
+/// Add dependency to specified table
+fn add_dependency(spec: &MatchSpec, to_add: &mut dyn TableLike) -> anyhow::Result<()> {
+
+    // Determine the name of the package to add
+    let name = spec
+        .name
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("* package specifier is not supported"))?;
+
+    // Format the requirement
+    // TODO: Do this smarter. E.g.:
+    //  - split this into an object if exotic properties (like channel) are specified.
+    //  - split the name from the rest of the requirement.
+    let spec_string = spec.to_string();
+    let requirement = spec_string.split_once(' ').unwrap_or(("", "*")).1;
+
+    // Store (or replace) in the document
+    to_add.insert(name, Item::Value(requirement.into()));
+
+    Ok(())
 }
 
 impl Project {
@@ -69,7 +92,7 @@ impl Project {
         Ok(result)
     }
 
-    pub fn add_dependency(&mut self, spec: &MatchSpec) -> anyhow::Result<()> {
+    pub fn add_conda_dependency(&mut self, spec: &MatchSpec) -> anyhow::Result<()> {
         // Find the dependencies table
         let deps = &mut self.doc["dependencies"];
 
@@ -83,23 +106,21 @@ impl Project {
             anyhow::anyhow!("dependencies in {} are malformed", consts::PROJECT_MANIFEST)
         })?;
 
-        // Determine the name of the package to add
-        let name = spec
-            .name
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("* package specifier is not supported"))?;
+        add_dependency(spec, deps_table)
+    }
 
-        // Format the requirement
-        // TODO: Do this smarter. E.g.:
-        //  - split this into an object if exotic properties (like channel) are specified.
-        //  - split the name from the rest of the requirement.
-        let spec_string = spec.to_string();
-        let requirement = spec_string.split_once(' ').unwrap_or(("", "*")).1;
+    pub fn add_pip_dependency(&mut self, spec: &MatchSpec) -> anyhow::Result<()> {
+        let pip_deps = &mut self.doc["pip"]["dependencies"];
+        if pip_deps.is_none() {
+            *pip_deps = Item::Table(Table::new());
+        }
 
-        // Store (or replace) in the document
-        deps_table.insert(name, Item::Value(requirement.into()));
+        let deps_table = pip_deps.as_table_like_mut().ok_or_else(|| {
+            anyhow::anyhow!("pip.dependencies in {} are malformed", consts::PROJECT_MANIFEST)
+        })?;
 
-        Ok(())
+        add_dependency(spec, deps_table)
+
     }
 
     /// Returns the root directory of the project
