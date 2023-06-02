@@ -107,12 +107,11 @@ async fn add_conda(specs: &Vec<MatchSpec>, project: &mut Project, sparse_repo_da
 pub async fn execute(args: Args) -> anyhow::Result<()> {
     // Determine the location and metadata of the current project
     let mut project = Project::discover()?;
-
-    // If it is a pip package just add it directly to the project
-    // Solve it with pip later
-
+    dbg!(&args);
     // Fetch the repodata for the project
     let added_specs = if args.pip {
+        // If it is a pip package just add it directly to the project
+        // Solve it with pip later
         let added_specs = add_pip(&args.specs, &mut project)?;
         update_lock_file(
             &project,

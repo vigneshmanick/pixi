@@ -110,12 +110,15 @@ impl Project {
     }
 
     pub fn add_pip_dependency(&mut self, spec: &MatchSpec) -> anyhow::Result<()> {
-        let pip_deps = &mut self.doc["pip"]["dependencies"];
-        if pip_deps.is_none() {
-            *pip_deps = Item::Table(Table::new());
+        let pip = &mut self.doc["pip"];
+        if pip.is_none() {
+            let mut table = Table::new();
+            table.set_dotted(true);
+            *pip =  Item::Table(table);
         }
+        let pip_deps = &mut self.doc["pip"]["dependencies"].or_insert(Item::Table(Table::new()));
 
-        let deps_table = pip_deps.as_table_like_mut().ok_or_else(|| {
+        let deps_table = pip_deps.as_table_mut().ok_or_else(|| {
             anyhow::anyhow!("pip.dependencies in {} are malformed", consts::PROJECT_MANIFEST)
         })?;
 
