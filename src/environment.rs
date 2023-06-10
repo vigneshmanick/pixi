@@ -277,6 +277,18 @@ pub async fn update_lock_file(
     Ok(conda_lock)
 }
 
+/// Create an up to date prefix where we can run pip and actually add the information to the lock file
+pub async fn update_lock_file_with_pip(
+    project: &Project,
+    existing_lock_file: &CondaLock,
+) -> anyhow::Result<()> {
+    // Create an up to date prefix
+    get_up_to_date_prefix(project).await?;
+
+    // Run pip dry-run with the requested dependencies
+    Ok(())
+}
+
 /// Returns the [`RepoDataRecord`]s for the packages of the current platform from the lock-file.
 pub fn get_required_packages(
     lock_file: &CondaLock,

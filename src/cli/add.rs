@@ -33,7 +33,11 @@ fn add_pip(specs: &Vec<MatchSpec>, project: &mut Project) -> anyhow::Result<Vec<
 }
 
 /// Adds the best solvable conda package to the project file
-async fn add_conda(specs: &Vec<MatchSpec>, project: &mut Project, sparse_repo_data: &Vec<SparseRepoData>) -> anyhow::Result<Vec<MatchSpec>> {
+async fn add_conda(
+    specs: &Vec<MatchSpec>,
+    project: &mut Project,
+    sparse_repo_data: &Vec<SparseRepoData>,
+) -> anyhow::Result<Vec<MatchSpec>> {
     // Split the specs into package name and version specifier
     let new_specs = specs
         .into_iter()
@@ -113,30 +117,25 @@ pub async fn execute(args: Args) -> anyhow::Result<()> {
         // If it is a pip package just add it directly to the project
         // Solve it with pip later
         let added_specs = add_pip(&args.specs, &mut project)?;
-        update_lock_file(
-            &project,
-            load_lock_file(&project).await?,
-            None,
-        )
-            .await?;
+        update_lock_file(&project, load_lock_file(&project).await?, None).await?;
         added_specs
     } else {
         let sparse_repo_data = project.fetch_sparse_repodata().await?;
         let added_specs = add_conda(&args.specs, &mut project, &sparse_repo_data).await?;
+
         // Update the lock file and write to disk
         update_lock_file(
             &project,
             load_lock_file(&project).await?,
             Some(sparse_repo_data),
         )
-            .await?;
+        .await?;
         added_specs
     };
 
-
     project.save()?;
 
-    let pkg_manager =  if args.pip {" (pip package)"} else { "" };
+    let pkg_manager = if args.pip { " (pip package)" } else { "" };
     for spec in added_specs {
         eprintln!(
             "{}Added {}{}",

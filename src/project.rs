@@ -14,10 +14,8 @@ pub struct Project {
     doc: Document,
 }
 
-
 /// Add dependency to specified table
 fn add_dependency(spec: &MatchSpec, to_add: &mut dyn TableLike) -> anyhow::Result<()> {
-
     // Determine the name of the package to add
     let name = spec
         .name
@@ -48,6 +46,11 @@ impl Project {
         Self::load(&project_toml)
     }
 
+    /// Check if the project has pip dependencies specified
+    pub fn has_pip_dependencies(&self) -> bool {
+        return !self.doc["pip"]["dependencies"].is_none();
+    }
+
     /// Loads a project manifest file.
     pub fn load(filename: &Path) -> anyhow::Result<Self> {
         // Determine the parent directory of the manifest file
@@ -70,6 +73,9 @@ impl Project {
         })
     }
 
+    /// Retrieve the project dependencies
+    /// Note that if the project has a [pip.dependencies] section
+    /// it will automatically add pip as a *conda* dependency
     pub fn dependencies(&self) -> anyhow::Result<HashMap<String, NamelessMatchSpec>> {
         let deps = self.doc["dependencies"].as_table_like().ok_or_else(|| {
             anyhow::anyhow!("dependencies in {} are malformed", consts::PROJECT_MANIFEST)
@@ -89,9 +95,16 @@ impl Project {
             result.insert(name.to_owned(), match_spec);
         }
 
+        /// Add pip as a dependency if it does not exist
+        /// so that we automatically have this in the environment
+        if self.has_pip_dependencies() {
+            result.insert("pip".to_owned(), NamelessMatchSpec::from_str("*")?);
+        }
+
         Ok(result)
     }
 
+    /// Add a conda dependency to the project
     pub fn add_conda_dependency(&mut self, spec: &MatchSpec) -> anyhow::Result<()> {
         // Find the dependencies table
         let deps = &mut self.doc["dependencies"];
@@ -109,21 +122,27 @@ impl Project {
         add_dependency(spec, deps_table)
     }
 
+    /// Add a pip dependency to the project
     pub fn add_pip_dependency(&mut self, spec: &MatchSpec) -> anyhow::Result<()> {
+        // This section creates a [pip.dependencies] section
+        // if it does not exist
         let pip = &mut self.doc["pip"];
         if pip.is_none() {
             let mut table = Table::new();
             table.set_dotted(true);
-            *pip =  Item::Table(table);
+            *pip = Item::Table(table);
         }
         let pip_deps = &mut self.doc["pip"]["dependencies"].or_insert(Item::Table(Table::new()));
 
         let deps_table = pip_deps.as_table_mut().ok_or_else(|| {
-            anyhow::anyhow!("pip.dependencies in {} are malformed", consts::PROJECT_MANIFEST)
+            anyhow::anyhow!(
+                "pip.dependencies table in {} are malformed",
+                consts::PROJECT_MANIFEST
+            )
         })?;
 
+        // Add the dependency to the toml
         add_dependency(spec, deps_table)
-
     }
 
     /// Returns the root directory of the project
