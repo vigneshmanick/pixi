@@ -1,6 +1,7 @@
 use console::style;
 
 mod cli;
+mod command;
 mod config;
 mod consts;
 mod environment;

@@ -4,6 +4,8 @@ on:
       - 'v*.*.*'
     branches:
       - main
+    paths-ignore:
+      - 'docs/**'
   workflow_dispatch:
   pull_request:
 
@@ -82,7 +84,7 @@ jobs:
           - { name: "Linux-x86_64",   target: x86_64-unknown-linux-musl,  os: ubuntu-20.04, use-cross: true }
 
           - { name: "macOS-x86_64",   target: x86_64-apple-darwin,        os: macOS-latest }
-          - { name: "macOS-aarch64",  target: aarch64-apple-darwin,       os: macOS-latest }
+          - { name: "macOS-aarch64",  target: aarch64-apple-darwin,       os: macOS-latest, skip-tests: true }
 
           - { name: "Windows-x86_64", target: x86_64-pc-windows-msvc,     os: windows-latest }
 
@@ -154,6 +156,13 @@ jobs:
           cargo -V
           rustc -V
 
+      - name: Check for release
+        id: is-release
+        shell: bash
+        run: |
+          unset IS_RELEASE ; if [[ $GITHUB_REF =~ ^refs/tags/v[0-9].* ]]; then IS_RELEASE='true' ; fi
+          echo "IS_RELEASE=${IS_RELEASE}" >> $GITHUB_OUTPUT
+
       - name: Set build options
         id: build-options
         shell: bash
@@ -163,14 +172,26 @@ jobs:
             *-musl*) CARGO_BUILD_OPTIONS="--no-default-features --features rustls-tls"  ;;
             *) CARGO_BUILD_OPTIONS=""  ;;
           esac
+
+          if [[ '${{ steps.is-release.outputs.IS_RELEASE }}' == 'true' ]]; then
+            CARGO_BUILD_OPTIONS="${CARGO_BUILD_OPTIONS} --profile=release-lto"
+            BUILD_TARGET_FOLDER="release-lto"
+          else
+            CARGO_BUILD_OPTIONS="${CARGO_BUILD_OPTIONS} --release"
+            BUILD_TARGET_FOLDER="release"
+          fi
+
+          echo "BUILD_TARGET_FOLDER=${BUILD_TARGET_FOLDER}" >> $GITHUB_OUTPUT
           echo "CARGO_BUILD_OPTIONS=${CARGO_BUILD_OPTIONS}" >> $GITHUB_OUTPUT
 
       - name: Build
         uses: actions-rs/cargo@v1
+        env:
+          BUILD_PROFILE: ${{ steps.is-release.outputs.IS_RELEASE && '--profile release-lto' || '--release' }}
         with:
           use-cross: ${{ matrix.job.use-cross }}
           command: build
-          args: --locked --release --target=${{ matrix.job.target }} ${{ steps.build-options.outputs.CARGO_BUILD_OPTIONS}}
+          args: --locked --target=${{ matrix.job.target }} ${{ steps.build-options.outputs.CARGO_BUILD_OPTIONS}}
 
       - name: Set binary name & path
         id: bin
@@ -181,11 +202,12 @@ jobs:
           case ${{ matrix.job.target }} in
             *-pc-windows-*) EXE_SUFFIX=".exe" ;;
           esac;
-          
+
           # Setup paths
-          BIN_NAME="${{ needs.crate_metadata.outputs.name }}${EXE_SUFFIX}"
-          BIN_PATH="target/${{ matrix.job.target }}/release/${BIN_NAME}"
-          
+          BUILD_TARGET_FOLDER="${{ steps.build-options.outputs.BUILD_TARGET_FOLDER }}"
+          BIN_NAME="${{ needs.crate_metadata.outputs.name }}${EXE_suffix}"
+          BIN_PATH="target/${{ matrix.job.target }}/${BUILD_TARGET_FOLDER}/${BIN_NAME}"
+
           # Let subsequent steps know where to find the binary
           echo "BIN_PATH=${BIN_PATH}" >> $GITHUB_OUTPUT
           echo "BIN_NAME=${BIN_NAME}" >> $GITHUB_OUTPUT
@@ -193,6 +215,7 @@ jobs:
 
       - name: Set testing options
         id: test-options
+        if: ${{ !matrix.job.skip-tests }}
         shell: bash
         run: |
           # test only library unit tests and binary for arm-type targets
@@ -201,10 +224,11 @@ jobs:
           echo "CARGO_TEST_OPTIONS=${CARGO_TEST_OPTIONS}" >> $GITHUB_OUTPUT
 
       - name: Run tests
+        if: ${{ !matrix.job.skip-tests }}
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ matrix.job.use-cross }}
-          command: build
+          command: test
           args: --locked --target=${{ matrix.job.target }} ${{ steps.test-options.outputs.CARGO_TEST_OPTIONS}} ${{ steps.build-options.outputs.CARGO_BUILD_OPTIONS}}
 
       - name: Build | Installer [Windows]
@@ -220,29 +244,30 @@ jobs:
         shell: bash
         run: |
           PKG_suffix=".tar.gz" ; case ${{ matrix.job.target }} in *-pc-windows-*) PKG_suffix=".zip" ;; esac;
-          PKG_BASENAME=${{ needs.crate_metadata.outputs.name }}-v${{ needs.crate_metadata.outputs.version }}-${{ matrix.job.target }}
+          PKG_BASENAME=${{ needs.crate_metadata.outputs.name }}-${{ matrix.job.target }}
           PKG_NAME=${PKG_BASENAME}${PKG_suffix}
           echo "PKG_NAME=${PKG_NAME}" >> $GITHUB_OUTPUT
-          
+
           PKG_STAGING="${{ env.CICD_INTERMEDIATES_DIR }}/package"
-          ARCHIVE_DIR="${PKG_STAGING}/${PKG_BASENAME}/"
-          mkdir -p "${ARCHIVE_DIR}"
-          # mkdir -p "${ARCHIVE_DIR}/autocomplete"
-          
+          mkdir -p "${PKG_STAGING}"
+
           # Binary
-          cp "${{ steps.bin.outputs.BIN_PATH }}" "$ARCHIVE_DIR"
-          
+          cp "${{ steps.bin.outputs.BIN_PATH }}" "$PKG_STAGING"
+
           # README, LICENSE and CHANGELOG files
-          # cp "README.md" "LICENSE-MIT" "LICENSE-APACHE" "CHANGELOG.md" "$ARCHIVE_DIR"
+          # cp "README.md" "LICENSE-MIT" "LICENSE-APACHE" "CHANGELOG.md" "$PKG_STAGING"
 
           # base compressed package
           pushd "${PKG_STAGING}/" >/dev/null
           case ${{ matrix.job.target }} in
-            *-pc-windows-*) 7z -y a "${PKG_NAME}" "${PKG_BASENAME}"/* | tail -2 ;;
-            *) tar czf "${PKG_NAME}" "${PKG_BASENAME}"/* ;;
+            *-pc-windows-*) 7z -y a "${PKG_NAME}" ./* | tail -2 ;;
+            *) tar czf "${PKG_NAME}" ./* ;;
           esac;
           popd >/dev/null
           
+          # Rename the binary to include the arch
+          mv ${{ steps.bin.outputs.BIN_PATH }} pixi-${{ matrix.target}}${{ steps.bin.outputs.EXE_SUFFIX }} 
+
           # Let subsequent steps know where to find the compressed package
           echo "PKG_PATH=${PKG_STAGING}/${PKG_NAME}" >> $GITHUB_OUTPUT
 
@@ -256,7 +281,15 @@ jobs:
         uses: actions/upload-artifact@master
         with:
           name: pixi-${{ matrix.target}}${{ steps.bin.outputs.EXE_SUFFIX }}
-          path: ${{ steps.bin.outputs.BIN_PATH }}
+          path: pixi-${{ matrix.target}}${{ steps.bin.outputs.EXE_SUFFIX }}
+
+      - name: Release | Upload installer artifacts [Windows]
+        continue-on-error: true
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v3
+        with:
+          name: pixi-${{ matrix.target }}.msi
+          path: target/wix/pixi-${{ matrix.target }}.msi
 
       - name: Release | Check for release
         id: is-release
@@ -271,15 +304,7 @@ jobs:
         with:
           files: |
             ${{ steps.package.outputs.PKG_PATH }}
-            ${{ steps.debian-package.outputs.DPKG_PATH }}
+            target/wix/pixi-${{ matrix.target }}.msi
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Release | Upload installer artifacts [Windows]
-        continue-on-error: true
-        if: steps.is-release.outputs.IS_RELEASE && matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v3
-        with:
-          name: pixi-${{ matrix.target }}.msi
-          path: target/wix/pixi-${{ matrix.target }}.msi
-
