@@ -84,9 +84,14 @@ jobs:
           - { name: "macOS-x86_64",   target: x86_64-apple-darwin,        os: macOS-latest }
           - { name: "macOS-aarch64",  target: aarch64-apple-darwin,       os: macOS-latest }
 
-          - { name: "Windows-x86_64", target: x86_64-pc-windows-msvc,     os: windows-2019 }
+          - { name: "Windows-x86_64", target: x86_64-pc-windows-msvc,     os: windows-latest }
+
+        include:
+          - os: windows-latest
+            rustflags: -C target-feature=+crt-static
     env:
       BUILD_CMD: cargo  # The build and test command to use if not overwritten
+      RUSTFLAGS: ${{ matrix.rustflags || '' }} -D warnings
     steps:
       - name: Checkout source code
         uses: actions/checkout@v3
@@ -117,6 +122,16 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cross
+
+        # For windows installer test
+        # On stable rust & main repo pushes only
+      - name: Install cargo-wix [Windows]
+        continue-on-error: true
+        if: matrix.os == 'windows-latest'
+        run: cargo install --version 0.3.4 cargo-wix
+        env:
+          # cargo-wix does not require static crt
+          RUSTFLAGS: ""
 
       - name: Overwrite build command env variable
         if: matrix.job.use-cross
@@ -162,18 +177,19 @@ jobs:
         shell: bash
         run: |
           # Figure out suffix of binary
-          EXE_suffix=""
+          EXE_SUFFIX=""
           case ${{ matrix.job.target }} in
-            *-pc-windows-*) EXE_suffix=".exe" ;;
+            *-pc-windows-*) EXE_SUFFIX=".exe" ;;
           esac;
           
           # Setup paths
-          BIN_NAME="${{ needs.crate_metadata.outputs.name }}${EXE_suffix}"
+          BIN_NAME="${{ needs.crate_metadata.outputs.name }}${EXE_SUFFIX}"
           BIN_PATH="target/${{ matrix.job.target }}/release/${BIN_NAME}"
           
           # Let subsequent steps know where to find the binary
           echo "BIN_PATH=${BIN_PATH}" >> $GITHUB_OUTPUT
           echo "BIN_NAME=${BIN_NAME}" >> $GITHUB_OUTPUT
+          echo "EXE_SUFFIX=${EXE_SUFFIX}" >> $GITHUB_OUTPUT
 
       - name: Set testing options
         id: test-options
@@ -190,6 +206,14 @@ jobs:
           use-cross: ${{ matrix.job.use-cross }}
           command: build
           args: --locked --target=${{ matrix.job.target }} ${{ steps.test-options.outputs.CARGO_TEST_OPTIONS}} ${{ steps.build-options.outputs.CARGO_BUILD_OPTIONS}}
+
+      - name: Build | Installer [Windows]
+        continue-on-error: true
+        if: matrix.os == 'windows-latest'
+        run: >
+          cargo wix -v --no-build --nocapture -I install/windows/main.wxs
+                    --target ${{ matrix.target }}
+                    --output target/wix/pixi-${{ matrix.target }}.msi
 
       - name: Create tarball
         id: package
@@ -222,20 +246,26 @@ jobs:
           # Let subsequent steps know where to find the compressed package
           echo "PKG_PATH=${PKG_STAGING}/${PKG_NAME}" >> $GITHUB_OUTPUT
 
-      - name: "Artifact upload: tarball"
+      - name: Release | Upload tarball
         uses: actions/upload-artifact@master
         with:
           name: ${{ steps.package.outputs.PKG_NAME }}
           path: ${{ steps.package.outputs.PKG_PATH }}
 
-      - name: Check for release
+      - name: Release | Upload binary
+        uses: actions/upload-artifact@master
+        with:
+          name: pixi-${{ matrix.target}}${{ steps.bin.outputs.EXE_SUFFIX }}
+          path: ${{ steps.bin.outputs.BIN_PATH }}
+
+      - name: Release | Check for release
         id: is-release
         shell: bash
         run: |
           unset IS_RELEASE ; if [[ $GITHUB_REF =~ ^refs/tags/v[0-9].* ]]; then IS_RELEASE='true' ; fi
           echo "IS_RELEASE=${IS_RELEASE}" >> $GITHUB_OUTPUT
 
-      - name: Publish archives and packages
+      - name: Release | Publish archives and packages
         uses: softprops/action-gh-release@v1
         if: steps.is-release.outputs.IS_RELEASE
         with:
@@ -244,4 +274,12 @@ jobs:
             ${{ steps.debian-package.outputs.DPKG_PATH }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release | Upload installer artifacts [Windows]
+        continue-on-error: true
+        if: steps.is-release.outputs.IS_RELEASE && matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v3
+        with:
+          name: pixi-${{ matrix.target }}.msi
+          path: target/wix/pixi-${{ matrix.target }}.msi
 
