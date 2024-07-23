@@ -9,16 +9,16 @@ There are multiple scenarios where multiple environments are useful.
 - **Large developer environments**, that combine all the smaller environments, e.g. `dev`.
 - **Strict supersets of environments**, e.g. `prod` and `test-prod` where `test-prod` is a strict superset of `prod`.
 - **Multiple machines from one project**, e.g. a `cuda` environment and a `cpu` environment.
-- **And many more.** (Feel free to edit this document in our GitHub and add your use case.)
+- **And many more.** (Feel free to edit this document and add your use case.)
 
 This prepares `pixi` for use in large projects with multiple use-cases, multiple developers and different CI needs.
 
 ## Design Considerations
 
-There are a few things we wanted to keep in mind in the design:
+There are a few things to keep in mind in the design:
 
 1. **User-friendliness**: Pixi is a user focussed tool that goes beyond developers. The feature should have good error reporting and helpful documentation from the start.
-2. **Keep it simple**: Not understanding the multiple environments feature shouldn't limit a user to use pixi. The feature should be "invisible" to the non-multi env use-cases.
+2. **Keep it simple**: Not understanding the multiple environments feature shouldn't limit a user to use pixi. The feature should be "invisible" to the non-multi environment use-cases.
 3. **No Automatic Combinatorial**: To ensure the dependency resolution process remains manageable, the solution should avoid a combinatorial explosion of dependency sets. By making the environments user defined and not automatically inferred by testing a matrix of the features.
 4. **Single environment Activation**: The design should allow only one environment to be active at any given time, simplifying the resolution process and preventing conflicts.
 5. **Fixed lock files**: It's crucial to preserve fixed lock files for consistency and predictability. Solutions must ensure reliability not just for authors but also for end-users, particularly at the time of lock file creation.
@@ -28,8 +28,8 @@ There are a few things we wanted to keep in mind in the design:
 Introduce environment sets into the `pixi.toml` this describes environments based on `feature`'s. Introduce features into the `pixi.toml` that can describe parts of environments.
 As an environment goes beyond just `dependencies` the `features` should be described including the following fields:
 
-- `dependencies`: The conda package dependencies
-- `pypi-dependencies`: The pypi package dependencies
+- `dependencies`: The Conda package dependencies
+- `pypi-dependencies`: The PyPI package dependencies
 - `system-requirements`: The system requirements of the environment
 - `activation`: The activation information for the environment
 - `platforms`: The platforms the environment can be run on.
@@ -157,7 +157,7 @@ To avoid duplication the packages `environments` field may contain multiple envi
 
 Users can manually activate the desired environment via command line or configuration.
 This approach guarantees a conflict-free environment by allowing only one feature set to be active at a time.
-For the user the cli would look like this:
+For the user the CLI would look like this:
 
 ```shell title="Default behavior"
 ➜ pixi run python
@@ -208,7 +208,7 @@ test = ["test"]
 dev = ["dev"]
 ```
 Trying to run the `abmi` task will prompt the user to select the environment.
-As it is available in all environments.
+As it's available in all environments.
 
 ```shell title="Interactive selection of environments if task is in multiple environments"
 ➜ pixi run ambi
@@ -223,8 +223,8 @@ Please select an environment to run the task in: ›
 Ambi::Test
 ```
 
-As you can see it runs the task defined in the `feature.task` but it is run in the `default` environment.
-This happens because the `ambi` task is defined in the `test` feature, and it is overwritten in the default environment.
+As you can see it runs the task defined in the `feature.task` but it's run in the `default` environment.
+This happens because the `ambi` task is defined in the `test` feature, and it's overwritten in the default environment.
 So the `tasks.default` is now non-reachable from any environment.
 
 Some other results running in this example:
@@ -406,7 +406,7 @@ Dev
     ```
 
 ??? tip "Multiple machines from one project"
-    This is an example for an ML project that should be executable on a machine that supports `cuda` and `mlx`. It should also be executable on machines that don't support `cuda` or `mlx`, we use the `cpu` feature for this.
+    This is an example for an ML project that should be executable on a machine that supports `cuda` and `mlx`. It should also be executable on machines that don't support `cuda` or `mlx`, use the `cpu` feature in this scenario.
 
     ```toml title="pixi.toml"
     [project]
