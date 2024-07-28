@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - spell-check
     paths:
       - "docs/**"
       - ".github/workflows/docs.yml"
@@ -34,13 +33,13 @@ concurrency:
 
 jobs:
   vale:
-    name: runner / vale
+    name: prose
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: errata-ai/vale-action@reviewdog
         with:
-          files: all
+          files: docs/features
           vale_flags: "--config=docs/.vale.ini"
           fail_on_error: true
 

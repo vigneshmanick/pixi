@@ -3,3 +3,4 @@ Conda
 PyPI
 CLI
 URL
+GitHub
