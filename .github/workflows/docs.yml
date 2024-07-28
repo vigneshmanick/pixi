@@ -41,6 +41,7 @@ jobs:
       - uses: errata-ai/vale-action@reviewdog
         with:
           files: docs
+          vale_flags: "--config=docs/.vale.ini"
 
   build-docs:
     if: github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/v')
