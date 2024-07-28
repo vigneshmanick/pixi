@@ -2,3 +2,4 @@ P|pixi
 Conda
 PyPI
 CLI
+URL
